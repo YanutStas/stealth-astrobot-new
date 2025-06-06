@@ -12,8 +12,8 @@ require("./src/commands/Admin/admin")(bot);
 
 // платные разделы:
 require("./src/commands/Client/Pay/compatibility")(bot, flow);
+require("./src/commands/Client/Pay/love")(bot, flow); //поменял местами
 require("./src/commands/Client/Pay/career")(bot, flow);
-require("./src/commands/Client/Pay/love")(bot, flow);
 
 // бесплатные разделы:
 require("./src/commands/Client/Free/general")(bot, flow);

@@ -1,4 +1,3 @@
-/*  src/commands/Client/Pay/career.js  */
 const { Markup } = require("telegraf");
 const axios = require("axios");
 const logger = require("../../../logger");
