@@ -1,185 +1,56 @@
-// src/commands/Client/Free/transit.js
-
-const axios = require("axios");
-const { DateTime } = require("luxon");
+/*  src/commands/Client/Free/transit.js  */
 const { Markup } = require("telegraf");
-const logger = require("../../../logger");
-const MODELS = require("../../../models");
+const { DateTime } = require("luxon");
+const { runFreeLLM } = require("./freeFactory");
 
 module.exports = (bot, flow) => {
-  /* ── Кнопка «Транзит (бесплатно)» ───────────────────────────────── */
+  /* — меню «Транзит» — */
   bot.action("transit_start", async (ctx) => {
     await ctx.answerCbQuery();
-
-    // Переходим в режим “transit”
     flow.set(ctx.from.id, "transit");
-
     await ctx.reply(
-      "🔭 Выберите, пожалуйста, период для транзита:\n\n",
+      "🔭 Выберите период для транзита:",
       Markup.inlineKeyboard([
-        [Markup.button.callback("Сегодня", "transit_today")],
-        [Markup.button.callback("Завтра", "transit_tomorrow")],
+        [Markup.button.callback("Сегодня", "tr_today")],
+        [Markup.button.callback("Завтра", "tr_tomorrow")],
       ])
     );
   });
 
-  /* ── Обработка транзита на сегодня ─────────────────────────────── */
-  bot.action("transit_today", async (ctx) => {
-    // Игнорируем, если не в режиме “transit”
-    if (flow.get(ctx.from.id) !== "transit") {
-      return;
-    }
+  const doTransit = (label, dateFn) => async (ctx) => {
+    if (flow.get(ctx.from.id) !== "transit") return;
     await ctx.answerCbQuery();
 
-    const t0 = Date.now();
-    const tag = ctx.from.username || ctx.from.id;
-    logger.info(`[transit] запрос @${tag} (сегодня)`);
+    const date = dateFn().toFormat("dd.MM.yyyy");
+    const prompt = `Краткий астрологический транзит на ${label.toLowerCase()} (${date}).
+Ответ в 3 блоках (≤500 символов):
+1. Общий обзор планет
+2. Эмоции
+3. Шутливый совет
+Без любви, денег и совместимости.`;
 
-    await ctx.reply("♒️ Рассчитываю транзиты на сегодня…");
-    const today = DateTime.local().toFormat("dd.MM.yyyy");
+    const backKb = Markup.inlineKeyboard([
+      [Markup.button.callback("Назад ◀️", "back_to_menu")],
+    ]);
 
-    const userPrompt = `Дай, пожалуйста, краткий астрологический транзит на дату ${today}.  
-Ответ раздели на три коротких блока (каждый блок — 1 абзац, максимум 500 символов):
-1. Общий обзор планетных влияний  
-2. Эмоции  
-3. Шутливый совет на сегодня  
+    await runFreeLLM(ctx, {
+      prompt,
+      sysMsg: "Пиши дружелюбно, с эмодзи.",
+      waitText:
+        label === "Сегодня"
+          ? "♒️ Рассчитываю транзит на сегодня…"
+          : "♒️ Рассчитываю транзит на завтра…",
+      featTag: `transit_${label.toLowerCase()}`,
+      keyboard: backKb,
+    });
+  };
 
-*Запрещено* упоминать любовь / отношения, деньги / карьеру и совместимость.  
-Только русский, можно эмодзи.  
-
-Пиши исключительно на русском языке, дружелюбно, с эмодзи. Не выходи за рамки 500 символов.`;
-
-    for (const model of MODELS) {
-      try {
-        const { data } = await axios.post(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            model,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Ты дружелюбный астролог-практик. Пиши только на русском языке, по шаблону.",
-              },
-              { role: "user", content: userPrompt },
-            ],
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        const answer = (data.choices?.[0]?.message?.content || "").trim();
-        logger.debug(
-          `[transit] ▼PROMPT(${model})\n${userPrompt}\n▲ANSWER(first300)\n${answer.slice(
-            0,
-            300
-          )}…`
-        );
-
-        await ctx.reply(
-          (answer || "🌌 Транзит пока недоступен. Попробуйте позже.") +
-            "\n\n💎 *Хочешь узнать о любви, деньгах или совместимости?* Нажми соответствующую платную кнопку!",
-          { parse_mode: "Markdown" }
-        );
-        logger.info(`[transit] ok ${model} ${Date.now() - t0}мс`);
-
-        flow.delete(ctx.from.id);
-        return;
-      } catch (e) {
-        logger.warn(
-          `[transit] FAIL ${model} | ${e.response?.status || e.code}`
-        );
-      }
-    }
-
-    await ctx.reply(
-      "🛠️ Планеты перегружены. Попробуйте позже.\n\n💎 *Хочешь узнать о любви, деньгах или совместимости?* Нажми соответствующую платную кнопку!",
-      { parse_mode: "Markdown" }
-    );
-    flow.delete(ctx.from.id);
-  });
-
-  /* ── Обработка транзита на завтра ─────────────────────────────── */
-  bot.action("transit_tomorrow", async (ctx) => {
-    // Игнорируем, если не в режиме “transit”
-    if (flow.get(ctx.from.id) !== "transit") {
-      return;
-    }
-    await ctx.answerCbQuery();
-
-    const t0 = Date.now();
-    const tag = ctx.from.username || ctx.from.id;
-    logger.info(`[transit] запрос @${tag} (завтра)`);
-
-    await ctx.reply("♒️ Рассчитываю транзиты на завтра…");
-    const tomorrow = DateTime.local().plus({ days: 1 }).toFormat("dd.MM.yyyy");
-
-    const userPrompt = `Дай, пожалуйста, краткий астрологический транзит на дату ${tomorrow}.  
-Ответ раздели на три коротких блока (каждый блок — 1 абзац, максимум 500 символов):
-1. Общий обзор планетных влияний  
-2. Эмоции  
-3. Шутливый совет на завтра  
-
-*Запрещено* упоминать любовь / отношения, деньги / карьеру и совместимость.  
-Только русский, можно эмодзи.  
-
-Пиши исключительно на русском языке, дружелюбно, с эмодзи. Не выходи за рамки 500 символов.`;
-
-    for (const model of MODELS) {
-      try {
-        const { data } = await axios.post(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            model,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Ты дружелюбный астролог-практик. Пиши только на русском языке, по шаблону.",
-              },
-              { role: "user", content: userPrompt },
-            ],
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        const answer = (data.choices?.[0]?.message?.content || "").trim();
-        logger.debug(
-          `[transit] ▼PROMPT(${model})\n${userPrompt}\n▲ANSWER(first300)\n${answer.slice(
-            0,
-            300
-          )}…`
-        );
-
-        await ctx.reply(
-          (answer || "🌌 Транзит пока недоступен. Попробуйте позже.") +
-            "\n\n💎 *Хочешь узнать о любви, деньгах или совместимости?* Нажми соответствующую платную кнопку!",
-          { parse_mode: "Markdown" }
-        );
-        logger.info(`[transit] ok ${model} ${Date.now() - t0}мс`);
-
-        flow.delete(ctx.from.id);
-        return;
-      } catch (e) {
-        logger.warn(
-          `[transit] FAIL ${model} | ${e.response?.status || e.code}`
-        );
-      }
-    }
-
-    await ctx.reply(
-      "🛠️ Планеты перегружены. Попробуйте позже.\n\n💎 *Хочешь узнать о любви, деньгах или совместимости?* Нажми соответствующую платную кнопку!",
-      { parse_mode: "Markdown" }
-    );
-    flow.delete(ctx.from.id);
-  });
+  bot.action(
+    "tr_today",
+    doTransit("Сегодня", () => DateTime.local())
+  );
+  bot.action(
+    "tr_tomorrow",
+    doTransit("Завтра", () => DateTime.local().plus({ days: 1 }))
+  );
 };
