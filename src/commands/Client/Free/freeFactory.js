@@ -1,30 +1,25 @@
 /*  src/commands/Client/Free/freeFactory.js  */
-const { Markup } = require("telegraf");
 const axios = require("axios");
-const { DateTime } = require("luxon");
+const { Markup } = require("telegraf");
 const logger = require("../../../logger");
 const MODELS = require("../../../models");
 
 const COMMON_SYS =
   "Ты дружелюбный астролог-практик. Не вставляй «###» и лишние пункты. " +
-  "Пиши ≤1200 символов, русский, эмодзи допускаются. Сейчас 2025 год.";
+  "Пиши ≤1200 символов, только русский, эмодзи можно. Сейчас 2025 год.";
 
-const inProgress = new Map();
+const inProgress = new Map(); // uid → true
 
-/* --- LLM helper -------------------------------------------------- */
-async function runFreeLLM(
-  ctx,
-  { prompt, sysMsg, waitText, featTag, keyboard }
-) {
+/* ─────────────────── LLM helper ─────────────────── */
+async function runFreeLLM(ctx, { prompt, sysMsg, waitText, featTag }) {
   const uid = ctx.from.id;
-  const t0 = Date.now();
   const log = logger.child({ feat: featTag });
+  const t0 = Date.now();
 
   if (inProgress.get(uid)) {
-    await ctx.reply("⏳ Секунду, я ещё думаю…");
+    await ctx.reply("⏳ Я ещё думаю над предыдущим ответом…");
     return;
   }
-
   inProgress.set(uid, true);
   await ctx.reply(waitText);
 
@@ -49,17 +44,20 @@ async function runFreeLLM(
       );
 
       const answer = (data.choices?.[0]?.message?.content || "").trim();
-      log.info({ uid, model, t: Date.now() - t0 }, "Бесплатный ответ");
+      log.info({ uid, model, t: Date.now() - t0 }, "бесплатный ответ");
 
-      await ctx.reply(answer || "🌌 Космос молчит.", {
-        parse_mode: "Markdown",
-        reply_markup: keyboard || undefined,
-      });
+      /* ответ + клавиатура в ОДНОМ сообщении  */
+      await ctx.reply(
+        answer || "🌌 Космос молчит.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Назад ◀️", "back_to_menu")],
+        ])
+      );
 
       inProgress.delete(uid);
       return;
     } catch (e) {
-      log.warn({ uid, model, code: e.code || e.response?.status }, "FAIL");
+      log.warn({ uid, model, code: e.code || e.response?.status }, "fail");
     }
   }
 
@@ -67,32 +65,27 @@ async function runFreeLLM(
   inProgress.delete(uid);
 }
 
-/* --- createFreeFeature (для general) ----------------------------- */
+/* ────────── createFeature для general.js ────────── */
 function createFreeFeature(bot, flow, cfg) {
   const { buttonId, waitText, askText, regExp, buildPrompt, sysMsg, validate } =
     cfg;
-
-  const log = logger.child({ feat: buttonId });
 
   bot.action(buttonId, async (ctx) => {
     await ctx.answerCbQuery();
     flow.delete(ctx.from.id);
     await ctx.reply(askText, { parse_mode: "Markdown" });
-    log.info({ uid: ctx.from.id }, "Нажата бесплатная кнопка");
   });
 
   bot.hears(
-    (text, ctx) => !flow.has(ctx.from.id) && regExp.test(text),
-    async (ctx) => {
-      const match = ctx.message.text.match(regExp);
-      if (validate && !validate(match)) {
-        await ctx.reply(askText, { parse_mode: "Markdown" });
+    (txt, ctx) => !flow.has(ctx.from.id) && regExp.test(txt),
+    (ctx) => {
+      const m = ctx.message.text.match(regExp);
+      if (validate && !validate(m)) {
+        ctx.reply(askText, { parse_mode: "Markdown" });
         return;
       }
-
-      const prompt = buildPrompt(match);
       runFreeLLM(ctx, {
-        prompt,
+        prompt: buildPrompt(m),
         sysMsg,
         waitText,
         featTag: buttonId,
@@ -101,5 +94,5 @@ function createFreeFeature(bot, flow, cfg) {
   );
 }
 
-module.exports = createFreeFeature;
-module.exports.runFreeLLM = runFreeLLM;
+module.exports = createFreeFeature; // для general.js
+module.exports.runFreeLLM = runFreeLLM; // для horoscope / transit

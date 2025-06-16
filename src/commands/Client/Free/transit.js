@@ -4,7 +4,7 @@ const { DateTime } = require("luxon");
 const { runFreeLLM } = require("./freeFactory");
 
 module.exports = (bot, flow) => {
-  /* — меню «Транзит» — */
+  /* меню транзита */
   bot.action("transit_start", async (ctx) => {
     await ctx.answerCbQuery();
     flow.set(ctx.from.id, "transit");
@@ -17,21 +17,17 @@ module.exports = (bot, flow) => {
     );
   });
 
-  const doTransit = (label, dateFn) => async (ctx) => {
+  const make = (label, dateFn) => async (ctx) => {
     if (flow.get(ctx.from.id) !== "transit") return;
     await ctx.answerCbQuery();
 
     const date = dateFn().toFormat("dd.MM.yyyy");
     const prompt = `Краткий астрологический транзит на ${label.toLowerCase()} (${date}).
-Ответ в 3 блоках (≤500 символов):
+Ответ тремя пронумерованными абзацами (≤500 символов):
 1. Общий обзор планет
 2. Эмоции
 3. Шутливый совет
 Без любви, денег и совместимости.`;
-
-    const backKb = Markup.inlineKeyboard([
-      [Markup.button.callback("Назад ◀️", "back_to_menu")],
-    ]);
 
     await runFreeLLM(ctx, {
       prompt,
@@ -41,16 +37,16 @@ module.exports = (bot, flow) => {
           ? "♒️ Рассчитываю транзит на сегодня…"
           : "♒️ Рассчитываю транзит на завтра…",
       featTag: `transit_${label.toLowerCase()}`,
-      keyboard: backKb,
     });
+    /* остаёмся в режиме – можно запросить другой день */
   };
 
   bot.action(
     "tr_today",
-    doTransit("Сегодня", () => DateTime.local())
+    make("Сегодня", () => DateTime.local())
   );
   bot.action(
     "tr_tomorrow",
-    doTransit("Завтра", () => DateTime.local().plus({ days: 1 }))
+    make("Завтра", () => DateTime.local().plus({ days: 1 }))
   );
 };
