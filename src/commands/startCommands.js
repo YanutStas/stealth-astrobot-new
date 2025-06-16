@@ -1,7 +1,6 @@
 const { Markup } = require("telegraf");
 
 module.exports = (bot) => {
-  // Обработчик команды /start и кнопки «Назад ◀️»
   bot.start(async (ctx) => {
     const name = ctx.from.first_name || "друг";
     await ctx.reply(
@@ -22,16 +21,14 @@ module.exports = (bot) => {
         ],
         [Markup.button.callback("🔭 Транзит (бесплатно)", "transit_start")],
         [Markup.button.callback("💕 Любовь (платно)", "love_start")],
-        [Markup.button.callback("💼 Карьера (платно)", "career_start")],
+        [Markup.button.callback("💼 Карьера (платно) 123", "career_start")],
         [Markup.button.callback("❤️ Совместимость (платно)", "compat_start")],
       ])
     );
   });
 
-  // Кнопка «Назад ◀️» возвращает в /start
   bot.action("back_to_menu", async (ctx) => {
     await ctx.answerCbQuery();
-    // Эмулируем /start: просто вызываем ту же логику:
     const name = ctx.from.first_name || "друг";
     await ctx.reply(
       `🌠 Привет, ${name}! Я собираю космические досье.\n` +

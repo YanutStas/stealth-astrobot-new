@@ -1,4 +1,3 @@
-/*  src/logger.js  */
 const pino = require("pino");
 
 const isDev = process.env.NODE_ENV !== "production";

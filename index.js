@@ -1,25 +1,28 @@
-// /srv/stealth-astrobot/index.js
 require("dotenv").config();
 const { Telegraf } = require("telegraf");
 const logger = require("./src/logger");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const flow = new Map(); // userId → "general" | "horoscope" | "transit" | "love" | "career" | "compat"
+const flow = new Map();
 
-// ─── подключаем все модули ──────────────────────────────
+// Обработка неотловленных ошибок
+process.on("uncaughtException", (err) => {
+  logger.error(`Uncaught Exception: ${err.stack}`);
+});
+
+bot.catch((err, ctx) => {
+  logger.error(`[Bot] Error for ${ctx.updateType}: ${err.stack}`);
+  ctx.reply("❌ Произошла ошибка, попробуйте позже");
+});
+
 require("./src/commands/startCommands")(bot);
 require("./src/commands/Admin/admin")(bot);
-
-// платные разделы:
 require("./src/commands/Client/Pay/compatibility")(bot, flow);
-require("./src/commands/Client/Pay/love")(bot, flow); //поменял местами
+require("./src/commands/Client/Pay/love")(bot, flow);
 require("./src/commands/Client/Pay/career")(bot, flow);
-
-// бесплатные разделы:
 require("./src/commands/Client/Free/general")(bot, flow);
 require("./src/commands/Client/Free/horoscope")(bot, flow);
 require("./src/commands/Client/Free/transit")(bot, flow);
-// ─────────────────────────────────────────────────────────
 
 bot.launch();
 process.once("SIGINT", () => bot.stop("SIGINT"));
