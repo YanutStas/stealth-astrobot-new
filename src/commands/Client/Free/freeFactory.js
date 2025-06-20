@@ -1,3 +1,4 @@
+"use strict";
 /*  src/commands/Client/Free/freeFactory.js  */
 const axios = require("axios");
 const { Markup } = require("telegraf");
@@ -6,12 +7,24 @@ const MODELS = require("../../../models");
 
 const COMMON_SYS =
   "Ты дружелюбный астролог-практик. Не вставляй «###» и лишние пункты. " +
-  "Пиши ≤1200 символов, только русский, эмодзи можно. Сейчас 2025 год.";
+  "Пиши ≤1200 символов, русский язык, можно эмодзи. Сейчас 2025 год.";
 
 const inProgress = new Map(); // uid → true
 
-/* ─────────────────── LLM helper ─────────────────── */
-async function runFreeLLM(ctx, { prompt, sysMsg, waitText, featTag }) {
+/* ──────────── LLM helper ──────────── */
+async function runFreeLLM(
+  ctx,
+  {
+    prompt,
+    sysMsg,
+    waitText,
+    featTag,
+    footer = "—\n🔓 Полный доступ к *любви, карьере и совместимости* — в платных функциях 👇",
+    buttons = Markup.inlineKeyboard([
+      [Markup.button.callback("Назад ◀️", "back_to_menu")],
+    ]),
+  }
+) {
   const uid = ctx.from.id;
   const log = logger.child({ feat: featTag });
   const t0 = Date.now();
@@ -46,13 +59,7 @@ async function runFreeLLM(ctx, { prompt, sysMsg, waitText, featTag }) {
       const answer = (data.choices?.[0]?.message?.content || "").trim();
       log.info({ uid, model, t: Date.now() - t0 }, "бесплатный ответ");
 
-      /* ответ + клавиатура в ОДНОМ сообщении  */
-      await ctx.reply(
-        answer || "🌌 Космос молчит.",
-        Markup.inlineKeyboard([
-          [Markup.button.callback("Назад ◀️", "back_to_menu")],
-        ])
-      );
+      await ctx.reply(`${answer}\n\n${footer}`, buttons);
 
       inProgress.delete(uid);
       return;
@@ -65,7 +72,7 @@ async function runFreeLLM(ctx, { prompt, sysMsg, waitText, featTag }) {
   inProgress.delete(uid);
 }
 
-/* ────────── createFeature для general.js ────────── */
+/* ───────── createFeature (general.js) ───────── */
 function createFreeFeature(bot, flow, cfg) {
   const { buttonId, waitText, askText, regExp, buildPrompt, sysMsg, validate } =
     cfg;
@@ -94,5 +101,5 @@ function createFreeFeature(bot, flow, cfg) {
   );
 }
 
-module.exports = createFreeFeature; // для general.js
-module.exports.runFreeLLM = runFreeLLM; // для horoscope / transit
+module.exports = createFreeFeature;
+module.exports.runFreeLLM = runFreeLLM;
