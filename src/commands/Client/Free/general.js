@@ -1,52 +1,100 @@
-/*  src/commands/Client/Free/general.js  */
+const { Markup } = require("telegraf");
 const { DateTime } = require("luxon");
-const createFeature = require("./freeFactory");
+const { drawNatalChart } = require("../../../utils/astroChart");
+const { runFreeLLM } = require("./freeFactory");
 
-/* валидация ввода */
-const natalReg = /^\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\s+.+$/;
-const isValid = (txt) =>
-  natalReg.test(txt.trim()) &&
-  DateTime.fromFormat(
-    txt.split(/\s+/).slice(0, 2).join(" "),
-    "dd.MM.yyyy HH:mm"
-  ).isValid;
+/* ── валидация ввода ─────────────────────────────── */
+const natalRx = /^\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\s+.+$/;
+const ampersand = /&/;
+const okInput = (t) =>
+  natalRx.test(t.trim()) &&
+  DateTime.fromFormat(t.split(/\s+/).slice(0, 2).join(" "), "dd.MM.yyyy HH:mm")
+    .isValid;
 
-/* системка только для данной фичи */
-const SYS_MSG =
-  "Пиши строго 7 пунктами + итогом. Запрещено упоминать любовь, деньги и совместимость.";
+/* ── кнопка меню ─────────────────────────────────── */
+module.exports = (bot) => {
+  bot.action("general_start", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.reply(
+      `Чтобы я составил твою *натальную карту*, пришли данные так:
 
-/* — экспорт для index.js — */
-module.exports = (bot, flow) =>
-  createFeature(bot, flow, {
-    buttonId: "general_start",
+📅 ДД.MM.ГГГГ   ⏰ ЧЧ:ММ   🗺 Город
 
-    askText:
-      "Чтобы я составил *натальную карту*, пришли данные одной строкой:\n\n" +
-      "📅 ДД.MM.ГГГГ   ⏰ ЧЧ:ММ   🗺 Город\n\n" +
-      "Пример: 01.01.2000 10:00 Москва",
+Пример: 01.01.2000 10:00 Москва`,
+      { parse_mode: "Markdown" }
+    );
+  });
 
-    waitText: "🔭 Сканирую звёзды…",
+  /* ── основной обработчик ───────────────────────── */
+  bot.hears(
+    (t) => okInput(t) && !ampersand.test(t),
+    async (ctx) => {
+      const uid = ctx.from.id;
+      const input = ctx.message.text.trim();
 
-    regExp: natalReg,
+      await ctx.reply("🔭 Сканирую звёзды и рисую карту… (до 1-2 мин)");
+      ctx.telegram.sendChatAction(ctx.chat.id, "upload_photo");
 
-    validate: ([txt]) => isValid(txt),
+      /* ----- PNG ----- */
+      let png;
+      try {
+        png = drawNatalChart(uid, input);
+      } catch {
+        png = null;
+      }
 
-    sysMsg: SYS_MSG,
-
-    buildPrompt: ([full]) =>
-      `
-Сделай краткий дружелюбный отчёт (≤1200 сим) по 7 пунктам:
-
-1. ☀️ Солнце — характер
-2. 🌙 Луна — эмоции
-3. 🡱 Асцендент — внешнее «я»
-4. 🔎 Опыт и знания
-5. 🎨 Таланты и хобби
-6. 🧘 Здоровье и ресурс
-7. 🌀 Внутренний конфликт
+      /* ----- отчёт ----- */
+      const prompt = `Сделай дружелюбный отчёт (≤900 симв.) по 7 пунктам:
+1. Солнце — характер
+2. Луна — эмоции
+3. Асцендент — внешнее «я»
+4. Опыт и знания
+5. Таланты и хобби
+6. Здоровье и ресурс
+7. Внутренний конфликт
 
 —
-✨ В итоге: (1–2 предложения)
+Итог: 1 предложение
+Дата: ${input}
+Запрещено: любовь, деньги, совместимость.`;
 
-Дата рождения: ${full.trim()}`.trim(),
-  });
+      let answer =
+        (await runFreeLLM(ctx, {
+          prompt,
+          sysMsg: "Пиши по пунктам, дружелюбно, с эмодзи. ≤900 символов.",
+          featTag: "general",
+          send: false,
+        })) || "🌌 Космос молчит.";
+
+      const footer =
+        "—\n🔓 Полный доступ к *любви, карьере и совместимости* — в платных функциях 👇";
+      const kb = Markup.inlineKeyboard([
+        [Markup.button.callback("Назад ◀️", "back_to_menu")],
+      ]);
+
+      /* гарантируем, что caption ≤ 1000 */
+      const fullCaption = `${answer}\n\n${footer}`;
+      let captionToSend = fullCaption;
+      if (captionToSend.length > 1000) {
+        captionToSend = fullCaption.slice(0, 997) + "…";
+      }
+
+      /* ----- отправка ----- */
+      if (png) {
+        await ctx.replyWithPhoto(
+          { source: png },
+          {
+            caption: captionToSend,
+            parse_mode: "Markdown",
+            reply_markup: kb.reply_markup,
+          }
+        );
+      } else {
+        await ctx.reply(fullCaption, {
+          parse_mode: "Markdown",
+          reply_markup: kb.reply_markup,
+        });
+      }
+    }
+  );
+};
