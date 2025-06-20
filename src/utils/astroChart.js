@@ -1,56 +1,57 @@
+// 📁 src/utils/astroChart.js
 const { createCanvas } = require("@napi-rs/canvas");
 const fs = require("fs");
 const path = require("path");
 const swe = require("swisseph");
 
-/* где лежат .se1-файлы Swiss-Ephemeris */
+// путь к  *.se1  (у вас уже лежат 18-21)
 swe.swe_set_ephe_path(path.join(require.resolve("swisseph"), "..", "ephe"));
 
 const PLANETS = [
-  { sym: "☉", code: swe.SUN },
-  { sym: "☾", code: swe.MOON },
-  { sym: "☿", code: swe.MERCURY },
-  { sym: "♀", code: swe.VENUS },
-  { sym: "♂", code: swe.MARS },
-  { sym: "♃", code: swe.JUPITER },
-  { sym: "♄", code: swe.SATURN },
+  { sym: "☉", code: swe.SE_SUN },
+  { sym: "☾", code: swe.SE_MOON },
+  { sym: "☿", code: swe.SE_MERCURY },
+  { sym: "♀", code: swe.SE_VENUS },
+  { sym: "♂", code: swe.SE_MARS },
+  { sym: "♃", code: swe.SE_JUPITER },
+  { sym: "♄", code: swe.SE_SATURN },
 ];
 
 const RAD = Math.PI / 180;
 const toPolar = (cx, cy, r, deg) => {
-  const a = deg * RAD - Math.PI / 2; // 0° — вверх
+  const a = deg * RAD - Math.PI / 2; // 0° вверх
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
 };
 
 /**
- * @param {number} uid   id пользователя (для tmp-имени файла)
- * @param {string} dtStr «01.01.2000 10:00 …»
- * @returns {string}     путь к PNG
+ * Рисует PNG и возвращает путь, всегда пересоздаёт картинку.
+ * @param {number} uid   — id Telegram-пользователя
+ * @param {string} dtStr — «DD.MM.YYYY HH:MM Город»
  */
 function drawNatalChart(uid, dtStr) {
   const filePath = path.join("/tmp", `natal_${uid}.png`);
-  if (fs.existsSync(filePath)) return filePath;
 
-  /* ---------- разбор даты ---------- */
+  /* ── дата → JD ─────────────────── */
   const [d, m, y, hh, mm] = dtStr
     .split(/[.\s:]+/)
     .slice(0, 5)
     .map(Number);
-  const jd = swe.swe_julday(y, m, d, hh + mm / 60, swe.GREG_CAL);
+  const jd = swe.swe_julday(y, m, d, hh + mm / 60, swe.SE_GREG_CAL);
 
-  /* ---------- долготы планет ---------- */
+  /* ── координаты планет ─────────── */
   PLANETS.forEach((p) => {
-    p.lon = swe.swe_calc_ut(jd, p.code, swe.FLG_SWIEPH)[0]; // [0] — долготa
+    const res = swe.swe_calc_ut(jd, p.code, swe.SEFLG_SWIEPH);
+    p.lon = res.longitude; // нужное поле!
   });
 
-  /* ---------- рисуем ---------- */
-  const canvas = createCanvas(800, 800);
-  const ctx = canvas.getContext("2d");
+  /* ── canvas ────────────────────── */
+  const C = createCanvas(800, 800);
+  const ctx = C.getContext("2d");
 
   ctx.fillStyle = "#1b2538";
   ctx.fillRect(0, 0, 800, 800);
 
-  // внешняя окружность
+  // окружность
   ctx.strokeStyle = "#fff";
   ctx.lineWidth = 4;
   ctx.beginPath();
@@ -88,7 +89,7 @@ function drawNatalChart(uid, dtStr) {
   ctx.textAlign = "center";
   ctx.fillText("Натальная карта", 400, 385);
 
-  fs.writeFileSync(filePath, canvas.toBuffer("image/png"));
+  fs.writeFileSync(filePath, C.toBuffer("image/png"));
   return filePath;
 }
 
