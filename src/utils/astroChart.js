@@ -1,96 +1,154 @@
 // 📁 src/utils/astroChart.js
+// ──────────────────────────────────────────────────────────
+// Мини-движок: рендер «чистой» натальной карты без лишних
+// квадратиков, emoji и т.д. Легенда - справа, круг чуть
+// смещён влево. Файл кешируется на /tmp по uid+строке запроса
+// ──────────────────────────────────────────────────────────
 const { createCanvas } = require("@napi-rs/canvas");
 const fs = require("fs");
 const path = require("path");
 const swe = require("swisseph");
+const crypto = require("crypto");
 
-// путь к  *.se1  (у вас уже лежат 18-21)
+/* где лежат *.se1 Swiss-Ephemeris */
 swe.swe_set_ephe_path(path.join(require.resolve("swisseph"), "..", "ephe"));
 
+/* планеты: тег (2-буквы), русский, цвет, код Swiss */
 const PLANETS = [
-  { sym: "☉", code: swe.SE_SUN },
-  { sym: "☾", code: swe.SE_MOON },
-  { sym: "☿", code: swe.SE_MERCURY },
-  { sym: "♀", code: swe.SE_VENUS },
-  { sym: "♂", code: swe.SE_MARS },
-  { sym: "♃", code: swe.SE_JUPITER },
-  { sym: "♄", code: swe.SE_SATURN },
+  { tag: "Сл", name: "Солнце", c: "#ffcb00", code: swe.SE_SUN },
+  { tag: "Лу", name: "Луна", c: "#c9c9c9", code: swe.SE_MOON },
+  { tag: "Ме", name: "Меркурий", c: "#ffae5c", code: swe.SE_MERCURY },
+  { tag: "Ве", name: "Венера", c: "#ff5ea2", code: swe.SE_VENUS },
+  { tag: "Ма", name: "Марс", c: "#ff4136", code: swe.SE_MARS },
+  { tag: "Юп", name: "Юпитер", c: "#23e0a3", code: swe.SE_JUPITER },
+  { tag: "Са", name: "Сатурн", c: "#c38be4", code: swe.SE_SATURN },
+  { tag: "Ур", name: "Уран", c: "#29c7f6", code: swe.SE_URANUS },
+  { tag: "Нп", name: "Нептун", c: "#4274ff", code: swe.SE_NEPTUNE },
+  { tag: "Пл", name: "Плутон", c: "#ff9419", code: swe.SE_PLUTO },
+];
+
+/* склонения для подписи «Солнце _в Овне_», … */
+const SIGNS_PRE = [
+  "в Овне",
+  "в Тельце",
+  "в Близнецах",
+  "в Раке",
+  "во Льве",
+  "в Деве",
+  "в Весах",
+  "в Скорпионе",
+  "в Стрельце",
+  "в Козероге",
+  "в Водолее",
+  "в Рыбах",
 ];
 
 const RAD = Math.PI / 180;
-const toPolar = (cx, cy, r, deg) => {
-  const a = deg * RAD - Math.PI / 2; // 0° вверх
+const pol = (cx, cy, r, deg) => {
+  const a = deg * RAD - Math.PI / 2;
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
 };
 
-/**
- * Рисует PNG и возвращает путь, всегда пересоздаёт картинку.
- * @param {number} uid   — id Telegram-пользователя
- * @param {string} dtStr — «DD.MM.YYYY HH:MM Город»
- */
-function drawNatalChart(uid, dtStr) {
-  const filePath = path.join("/tmp", `natal_${uid}.png`);
+/* ───────────── основной экспорт ───────────── */
+function drawNatalChart(uid, input) {
+  /* кэш */
+  const h = crypto.createHash("md5").update(input).digest("hex").slice(0, 8);
+  const file = `/tmp/natal_${uid}_${h}.png`;
+  if (fs.existsSync(file)) return file;
 
-  /* ── дата → JD ─────────────────── */
-  const [d, m, y, hh, mm] = dtStr
-    .split(/[.\s:]+/)
-    .slice(0, 5)
-    .map(Number);
-  const jd = swe.swe_julday(y, m, d, hh + mm / 60, swe.SE_GREG_CAL);
+  /* ── парсим ввод (01.01.2000 10:00 Москва) ── */
+  const [d, m, y, hh, mm, ...cityArr] = input.split(/[:.\s]+/);
+  const JD = swe.swe_julday(+y, +m, +d, +hh + +mm / 60, swe.SE_GREG_CAL);
+  const city = cityArr.join(" ");
 
-  /* ── координаты планет ─────────── */
+  /* координаты+знак */
   PLANETS.forEach((p) => {
-    const res = swe.swe_calc_ut(jd, p.code, swe.SEFLG_SWIEPH);
-    p.lon = res.longitude; // нужное поле!
+    p.lon = swe.swe_calc_ut(JD, p.code, swe.SEFLG_SWIEPH).longitude;
+    p.sign = Math.floor(p.lon / 30) % 12;
   });
 
-  /* ── canvas ────────────────────── */
-  const C = createCanvas(800, 800);
-  const ctx = C.getContext("2d");
+  /* canvas */
+  const W = 1600,
+    H = 1000,
+    CX = 520,
+    CY = H / 2,
+    R = 460, // круг сдвинут влево
+    LX = W - 350; // легенда
 
-  ctx.fillStyle = "#1b2538";
-  ctx.fillRect(0, 0, 800, 800);
+  const cv = createCanvas(W, H);
+  const ctx = cv.getContext("2d");
 
-  // окружность
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 4;
+  /* фон */
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, "#0f172a");
+  g.addColorStop(1, "#1e293b");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  /* внешний круг и 12 радиальных линий */
+  ctx.strokeStyle = "#334155";
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.arc(400, 400, 330, 0, Math.PI * 2);
+  ctx.arc(CX, CY, R, 0, Math.PI * 2);
   ctx.stroke();
 
-  // 12 секторов
-  ctx.strokeStyle = "#444";
   ctx.lineWidth = 1;
   for (let i = 0; i < 12; i++) {
-    const [x, y] = toPolar(400, 400, 330, i * 30);
+    const [x, y] = pol(CX, CY, R, i * 30);
     ctx.beginPath();
-    ctx.moveTo(400, 400);
+    ctx.moveTo(CX, CY);
     ctx.lineTo(x, y);
     ctx.stroke();
   }
 
-  // планеты
-  PLANETS.forEach(({ sym, lon }) => {
-    const [x, y] = toPolar(400, 400, 280, lon);
-    ctx.fillStyle = "#ffcc00";
+  /* планеты */
+  PLANETS.forEach((p) => {
+    const [x, y] = pol(CX, CY, R - 95, p.lon);
+
+    ctx.fillStyle = p.c;
     ctx.beginPath();
-    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.arc(x, y, 24, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = "#000";
-    ctx.font = "13px sans-serif";
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 22px Arial, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(sym, x, y + 4);
+    ctx.textBaseline = "middle";
+    ctx.fillText(p.tag, x, y);
   });
 
-  // подпись
+  /* центр-надпись */
   ctx.fillStyle = "#fff";
-  ctx.font = "20px sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("Натальная карта", 400, 385);
+  ctx.font = "bold 32px Arial, sans-serif";
+  ctx.fillText("НАТАЛЬНАЯ КАРТА", CX, CY - 10);
+  ctx.font = "20px Arial, sans-serif";
+  ctx.fillText(
+    `${d}.${m}.${y}  ${hh}:${mm.padStart(2, "0")}  ${city}`,
+    CX,
+    CY + 26
+  );
 
-  fs.writeFileSync(filePath, C.toBuffer("image/png"));
-  return filePath;
+  /* легенда */
+  const top = CY - R + 60,
+    step = 42;
+  ctx.textAlign = "left";
+  ctx.font = "24px Arial, sans-serif";
+  ctx.fillText("Планеты и знаки", LX, top);
+
+  ctx.font = "18px Arial, sans-serif";
+  PLANETS.forEach((p, i) => {
+    const y = top + 40 + i * step;
+    ctx.fillStyle = p.c;
+    ctx.beginPath();
+    ctx.arc(LX, y, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    ctx.fillText(`${p.tag}: ${p.name} ${SIGNS_PRE[p.sign]}`, LX + 28, y + 3);
+  });
+
+  fs.writeFileSync(file, cv.toBuffer("image/png"));
+  return file;
 }
-
 module.exports = { drawNatalChart };
