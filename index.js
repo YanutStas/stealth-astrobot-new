@@ -23,6 +23,8 @@ require("./src/commands/Client/Pay/career")(bot, flow);
 require("./src/commands/Client/Free/general")(bot, flow);
 require("./src/commands/Client/Free/horoscope")(bot, flow);
 require("./src/commands/Client/Free/transit")(bot, flow);
+require("./src/cron/dailyPins")(bot);
+
 
 bot.launch();
 process.once("SIGINT", () => bot.stop("SIGINT"));

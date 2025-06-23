@@ -8,7 +8,9 @@
     "astronomia": "^4.1.1",
     "axios": "^1.9.0",
     "dotenv": "^16.5.0",
+    "ioredis": "^5.6.1",
     "luxon": "^3.6.1",
+    "node-cron": "^4.1.0",
     "pino": "^9.7.0",
     "swisseph": "^0.5.17",
     "telegraf": "^4.16.3"
