@@ -6,18 +6,16 @@ const pending = require("../../pendingStore");
 const logger = require("../../../logger");
 const MODELS = require("../../../models");
 
-/* общее system-сообщение */
+/* ——— общее системное сообщение ——— */
 const COMMON_SYS =
-  "Ты дружелюбный астролог-практик. Не вставляй «###», не добавляй лишние пункты, " +
-  "заголовки, рекламу или ссылки. Русский язык, эмодзи приветствуются. " +
-  "Учитывай, что сейчас 2025 год.";
+  "Ты дружелюбный астролог-практик. Без «###», лишних пунктов, рекламы. " +
+  "Русский язык, можно эмодзи. Сейчас 2025 год.";
 
-/* анти-флуд и очередь */
 const inProgress = new Map(); // uid → true
 const usage = new Map(); // uid → { ts, count }
 const DAILY_LIMIT = 30;
 
-/* LLM-запрос с retry */
+/* ——— запрос к LLM с повторами ——— */
 async function fetchLLM(model, messages, retries = 2) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -25,7 +23,7 @@ async function fetchLLM(model, messages, retries = 2) {
         "https://openrouter.ai/api/v1/chat/completions",
         { model, messages },
         {
-          timeout: 20000,
+          timeout: 20_000,
           headers: {
             Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
             "Content-Type": "application/json",
@@ -44,12 +42,15 @@ async function fetchLLM(model, messages, retries = 2) {
   }
 }
 
+/* ——— основной экспорт фабрики ——— */
 module.exports = function createPaidFeature(bot, flow, cfg) {
   const {
     key,
     buttonId,
     label,
     price,
+    payUrl,
+    payCard = "2200 2803 5427 7545", // если нет payUrl — предлагаем перевод на карту
     askText,
     waitText,
     hintText,
@@ -63,27 +64,27 @@ module.exports = function createPaidFeature(bot, flow, cfg) {
 
   const log = logger.child({ feat: key });
 
-  /* ── кнопка в меню ───────────────────────────────────── */
+  /* — кнопка в главном меню — */
   bot.action(buttonId, async (ctx) => {
     await ctx.answerCbQuery();
     flow.set(ctx.from.id, key);
     pending.set(ctx.from.id, { label, ask: askText });
 
     log.info({ uid: ctx.from.id }, "Нажата кнопка");
-    await ctx.reply(
-      `💳 Для получения *${label}* переведи ${price} ₽ на карту:\n` +
-        "2200 7009 7760 7737\n\nЗатем пришли скриншот чека 👇",
-      { parse_mode: "Markdown" }
-    );
+
+    const paymentInstruction = payUrl
+      ? `💳 Для получения *${label}* сделай донат *${price} ₽* по ссылке:\n${payUrl}\n\nЗатем пришли скриншот чека 👇`
+      : `💳 Для получения *${label}* переведи *${price} ₽* на карту:\n${payCard}\n\nЗатем пришли скриншот чека 👇`;
+
+    await ctx.reply(paymentInstruction, { parse_mode: "Markdown" });
   });
 
-  /* ── основной hears ─────────────────────────────────── */
+  /* — основной hears (обработка данных после оплаты) — */
   bot.hears(
     (text, ctx) => flow.get(ctx.from.id) === key && regExp.test(text),
     async (ctx) => {
       const uid = ctx.from.id;
 
-      /* очередь */
       if (inProgress.get(uid)) {
         await ctx.reply("⏳ Я ещё думаю над предыдущим ответом…");
         return;
@@ -113,10 +114,6 @@ module.exports = function createPaidFeature(bot, flow, cfg) {
         return;
       }
 
-      /* логируем короткий пользовательский ввод */
-      const userText = ctx.message.text.trim().replace(/\n/g, " | ");
-      log.info({ uid }, `Запрос: ${userText}`);
-
       inProgress.set(uid, true);
       stat.count += 1;
       usage.set(uid, stat);
@@ -139,12 +136,7 @@ module.exports = function createPaidFeature(bot, flow, cfg) {
               maxRetries
             );
 
-            const latency = Date.now() - t0;
-            log.info({ uid, model, t: latency }, "Успешный ответ");
-
-            const shortAns = answer.replace(/\s+/g, " ").slice(0, 400);
-            log.debug({ uid, model }, `Ответ: ${shortAns}`);
-
+            log.info({ uid, model, t: Date.now() - t0 }, "Успешный ответ");
             await ctx.reply(
               answer || "🌌 Космос молчит.",
               Markup.inlineKeyboard([
@@ -175,7 +167,7 @@ module.exports = function createPaidFeature(bot, flow, cfg) {
     }
   );
 
-  /* ── подсказка / пропуск ďalším middleware ─────────── */
+  /* — подсказка по формату, если пользователь ввёл что-то лишнее — */
   bot.on("message", async (ctx, next) => {
     if (flow.get(ctx.from.id) === key) {
       await ctx.reply(hintText, { parse_mode: "Markdown" });

@@ -1,55 +1,55 @@
-//  src/commands/Client/Free/horoscope.js
-const { Markup } = require("telegraf");
-const { DateTime } = require("luxon");
-const { runFreeLLM } = require("./freeFactory");
+// 📁 src/commands/Client/Free/horoscope.js
+const { Markup }  = require('telegraf');
+const { runFreeLLM } = require('./freeFactory');           // наш helper
 
+/* ── список знаков и ключей для callback ── */
 const SIGNS = [
-  "Овен",
-  "Телец",
-  "Близнецы",
-  "Рак",
-  "Лев",
-  "Дева",
-  "Весы",
-  "Скорпион",
-  "Стрелец",
-  "Козерог",
-  "Водолей",
-  "Рыбы",
+  { key: 'aries',       ru: 'Овен'       },
+  { key: 'taurus',      ru: 'Телец'      },
+  { key: 'gemini',      ru: 'Близнецы'   },
+  { key: 'cancer',      ru: 'Рак'        },
+  { key: 'leo',         ru: 'Лев'        },
+  { key: 'virgo',       ru: 'Дева'       },
+  { key: 'libra',       ru: 'Весы'       },
+  { key: 'scorpio',     ru: 'Скорпион'   },
+  { key: 'sagittarius', ru: 'Стрелец'    },
+  { key: 'capricorn',   ru: 'Козерог'    },
+  { key: 'aquarius',    ru: 'Водолей'    },
+  { key: 'pisces',      ru: 'Рыбы'       },
 ];
 
 module.exports = (bot, flow) => {
-  /* меню выбора знака */
-  bot.action("horoscope_start", async (ctx) => {
+  /* ── первый клик «Гороскоп на неделю» ── */
+  bot.action('horoscope_start', async (ctx) => {
     await ctx.answerCbQuery();
-    flow.set(ctx.from.id, "horoscope");
-    await ctx.reply(
-      "✨ Выберите ваш знак Зодиака:",
-      Markup.inlineKeyboard(
-        SIGNS.map((s) => [Markup.button.callback(s, `hs_${s}`)])
-      )
-    );
+    const rows = SIGNS.map(s => [Markup.button.callback(s.ru, `hz_${s.key}`)]);
+    await ctx.reply('🔎 Выбери свой знак зодиака 👇',
+      Markup.inlineKeyboard(rows));
   });
 
-  /* сам прогноз */
-  SIGNS.forEach((sign) => {
-    bot.action(`hs_${sign}`, async (ctx) => {
-      if (flow.get(ctx.from.id) !== "horoscope") return;
-      await ctx.answerCbQuery();
+  /* ── обработчики по каждому знаку ── */
+  SIGNS.forEach(({ key, ru }) => {
+    bot.action(`hz_${key}`, async (ctx) => {
+      await ctx.answerCbQuery(`Готовлю прогноз для «${ru}»`);
 
-      const today = DateTime.local().toFormat("dd.MM.yyyy");
-      const prompt = `Гороскоп на неделю для знака «${sign}» (${today}).
+      const prompt =
+        `Составь короткий (до 900 симв.) 7-дневный гороскоп для знака ` +
+        `${ru}. Дай 2 небольших абзаца: «Общие тенденции» и «Совет дня».`;
 
-1. 🌟 Общие тенденции (избегай тем любви, карьеры, денег)
-2. 💡 Совет дня (нейтральный, практичный)`;
-
-      await runFreeLLM(ctx, {
+      const answer = await runFreeLLM(ctx, {
         prompt,
-        sysMsg:
-          "Ты дружелюбный астролог. Пиши структурировано, кратко, с эмодзи. Запрещены темы любви, денег, карьеры.",
-        waitText: "🔮 Составляю прогноз…",
-        featTag: "horoscope",
+        sysMsg : 'Структура: заголовки с эмодзи, без даты, без ссылок.',
+        featTag: 'weekly',
+        waitText: '🔮 Составляю прогноз…',
+        send: false,                 // вернём текст, потом обогащаем кнопкой
       });
+
+      await ctx.reply(
+        answer || '🌌 Космос молчит.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('Назад ◀️', 'back_to_menu')],
+        ]),
+      );
     });
   });
 };

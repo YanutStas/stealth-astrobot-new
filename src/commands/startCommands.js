@@ -6,10 +6,13 @@ const redis = new Redis(process.env.REDIS_URL);
 /* ── цены платных мини-отчётов ── */
 const PRICES = { love: 50, career: 50, compat: 150 };
 
-/* ── вспомогалка: текст главного меню ── */
-function makeMenuText(name, dailyOn) {
-  return `🌠 *Привет, ${name}!*  
-Здесь ты можешь получить:
+/* ── единый рендер главного меню ── */
+async function sendMainMenu(ctx) {
+  const name = ctx.from.first_name || "друг";
+  const uid = ctx.from.id.toString();
+  const dailyOn = await redis.sismember("daily_subs", uid);
+
+  const menuText = `🌠 *Привет, ${name}!*  
 
 🆓 *Бесплатно*  
 • 🔮 Натальная карта — базовый портрет  
@@ -23,11 +26,8 @@ function makeMenuText(name, dailyOn) {
 • ❤️ Совместимость — *${PRICES.compat} ₽*
 
 Выбирай нужное 👇`;
-}
 
-/* ── клавиатура главного меню ── */
-function makeMenuKeyboard(dailyOn) {
-  return Markup.inlineKeyboard([
+  const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback("🔮 Натальная карта", "general_start")],
     [Markup.button.callback("✨ Гороскоп на неделю", "horoscope_start")],
     [Markup.button.callback("🔭 Транзит", "transit_start")],
@@ -46,57 +46,55 @@ function makeMenuKeyboard(dailyOn) {
       ),
     ],
   ]);
+
+  /* если это callback-запрос и в исходном сообщении есть text — пробуем редактировать;
+     если же сообщение — фото/документ/что-то без text, просто шлём новое */
+  if (ctx.callbackQuery) {
+    const msg = ctx.callbackQuery.message;
+    if (msg && (msg.text || msg.caption)) {
+      try {
+        /* у фото/видео есть caption, но Telegram не разрешает editMessageText —
+           поэтому проверяем, что поле text заполнено */
+        if (msg.text) {
+          await ctx.editMessageText(menuText, {
+            parse_mode: "Markdown",
+            ...keyboard,
+          });
+          return;
+        }
+      } catch (e) {
+        // падаем в отправку нового
+      }
+    }
+  }
+
+  await ctx.reply(menuText, { parse_mode: "Markdown", ...keyboard });
 }
 
 module.exports = (bot) => {
-  /* ── отправка / редактирование главного меню ── */
-  const sendMainMenu = async (ctx, edit = false) => {
-    const name = ctx.from.first_name || "друг";
-    const uid = ctx.from.id.toString();
-    const dailyOn = await redis.sismember("daily_subs", uid);
-    const text = makeMenuText(name, !!dailyOn);
-    const keyboard = makeMenuKeyboard(!!dailyOn).reply_markup;
+  /* /start */
+  bot.start(sendMainMenu);
 
-    if (edit) {
-      /* редактируем существующее сообщение (из callback-query) */
-      await ctx.editMessageText(text, {
-        parse_mode: "Markdown",
-        reply_markup: keyboard,
-      });
-    } else {
-      /* отправка нового сообщения (/start, «Назад») */
-      await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard });
-    }
-  };
-
-  /* ── /start ── */
-  bot.start((ctx) => sendMainMenu(ctx));
-
-  /* ── «◀️ Назад» ── */
+  /* «Назад» */
   bot.action("back_to_menu", async (ctx) => {
     await ctx.answerCbQuery();
-    sendMainMenu(ctx, true);
+    await sendMainMenu(ctx);
   });
 
-  /* ── переключатель «Совет дня» ── */
+  /* переключатель «Совет дня» */
   bot.action("daily_toggle", async (ctx) => {
+    await ctx.answerCbQuery();
     const uid = ctx.from.id.toString();
-    const on = await redis.sismember("daily_subs", uid);
+    const isOn = await redis.sismember("daily_subs", uid);
 
-    if (on) {
+    if (isOn) {
       await redis.srem("daily_subs", uid);
-      await ctx.answerCbQuery("🛑 Ежедневные советы выключены.", {
-        show_alert: true,
-      });
+      await ctx.reply("🛑 Ежедневные советы выключены.");
     } else {
       await redis.sadd("daily_subs", uid);
-      await ctx.answerCbQuery(
-        "✅ Включено! Буду присылать совет и закреплять его.",
-        { show_alert: true }
-      );
+      await ctx.reply("✅ Включено! Буду присылать совет и закреплять его.");
     }
 
-    /* обновляем текст и подпись кнопки прямо в том же сообщении */
-    sendMainMenu(ctx, true);
+    await sendMainMenu(ctx); // перерисовываем меню
   });
 };
